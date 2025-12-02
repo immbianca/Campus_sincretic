@@ -74,7 +74,6 @@ try {
     ";
 
     $pdo->exec($sql);
-    echo "<h2>Baza de date Si tabelele au fost create cu succes!</h2>";
 
 } catch (PDOException $e) {
     echo "<h3>Eroare: " . $e->getMessage() . "</h3>";
