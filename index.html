@@ -28,9 +28,30 @@
         </div>
         <script>
             function loadPage(page){
-                document.getElementById('contentFrame').src=page;
+                document.getElementById('contentFrame').src = page;
+                window.location.hash = page; // Actualizează URL-ul pentru a reține starea
+                
+                // Opțional: marchează butonul activ
+                const buttons = document.querySelectorAll('nav button');
+                buttons.forEach(button => {
+                    button.classList.remove('active');
+                    if (button.getAttribute('onclick').includes(page)) {
+                        button.classList.add('active');
+                    }
+                });
             }
+
+            // Incarca pagina corecta la start, in functie de hash (daca exista)
+            window.onload = function() {
+                const initialPage = window.location.hash ? window.location.hash.substring(1) : 'dashboard.html';
+                loadPage(initialPage);
+            };
+
+            // Adauga suport pentru back/forward browser
+            window.onhashchange = function() {
+                const page = window.location.hash ? window.location.hash.substring(1) : 'dashboard.html';
+                loadPage(page);
+            };
         </script>
     </body>
 </html>
-    
