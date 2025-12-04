@@ -1,13 +1,11 @@
 <?php
-// Pornim sesiunea pentru a gestiona mesajele de stare (succes/eroare)
 session_start();
 include "db.php";
 
 $error_message = $_SESSION['error'] ?? '';
 $success_message = $_SESSION['message'] ?? '';
-unset($_SESSION['error'], $_SESSION['message']); // Ștergem mesajele după afișare
+unset($_SESSION['error'], $_SESSION['message']); 
 
-// --- Funcție de ajutare pentru a prelua locurile libere dintr-o cameră ---
 /**
  * Calculează numărul de locuri rămase libere într-o cameră dată.
  * @param PDO $pdo Conexiunea la baza de date.
@@ -15,7 +13,6 @@ unset($_SESSION['error'], $_SESSION['message']); // Ștergem mesajele după afi�
  * @return int Numărul de locuri disponibile.
  */
 function get_locuri_libere($pdo, $id_camera) {
-    // Preluăm locurile ocupate
     $stmt_ocupate = $pdo->prepare("
         SELECT COUNT(id_student) AS ocupate
         FROM repartizare
@@ -24,7 +21,6 @@ function get_locuri_libere($pdo, $id_camera) {
     $stmt_ocupate->execute([$id_camera]);
     $ocupate = $stmt_ocupate->fetch(PDO::FETCH_COLUMN);
 
-    // Preluăm numărul total de locuri
     $stmt_total = $pdo->prepare("
         SELECT nr_locuri_total
         FROM camera
@@ -37,14 +33,12 @@ function get_locuri_libere($pdo, $id_camera) {
 }
 
 
-// --- 1. GESTIONARE ADĂUGARE/MUTARE REPARTIZARE ---
 if (isset($_POST['repartizeaza'])) {
     $id_student = intval($_POST['id_student'] ?? 0);
     $id_camera = intval($_POST['id_camera'] ?? 0);
     $data_repartizare = date('Y-m-d');
 
     if ($id_student > 0 && $id_camera > 0) {
-        // Verifică dacă studentul are deja o repartizare activă
         $stmt_existenta = $pdo->prepare("
             SELECT id_repartizare, id_camera
             FROM repartizare
@@ -53,7 +47,6 @@ if (isset($_POST['repartizeaza'])) {
         $stmt_existenta->execute([$id_student]);
         $repartizare_existenta = $stmt_existenta->fetch(PDO::FETCH_ASSOC);
 
-        // Verifică locurile libere în camera destinație
         $locuri_libere = get_locuri_libere($pdo, $id_camera);
 
         $este_mutare = ($repartizare_existenta && $repartizare_existenta['id_camera'] != $id_camera);
@@ -62,11 +55,9 @@ if (isset($_POST['repartizeaza'])) {
         
         if ($este_aceeasi) {
              $_SESSION['message'] = "Studentul este deja repartizat în camera selectată. Nu s-a făcut nicio modificare.";
-        } elseif ($locuri_libere > 0 || $este_mutare) { // Dacă este mutare, nu trebuie să verificăm locurile libere (locul se eliberează și se ocupă simultan)
+        } elseif ($locuri_libere > 0 || $este_mutare) { 
             
-            // Cazul Mutare: Anulează repartizarea veche
             if ($este_mutare) {
-                // 1. Dezactivează repartizarea veche (ștergere logică)
                 $stmt_dezactiveaza = $pdo->prepare("
                     UPDATE repartizare 
                     SET activ = 0 
@@ -74,14 +65,12 @@ if (isset($_POST['repartizeaza'])) {
                 ");
                 $stmt_dezactiveaza->execute([$repartizare_existenta['id_repartizare']]);
                 
-                // Recalculăm locurile libere
                 $locuri_ramase = get_locuri_libere($pdo, $id_camera) - 1; 
 
-            } else { // Cazul Nouă
+            } else { 
                 $locuri_ramase = $locuri_libere - 1;
             }
             
-            // Adaugă noua repartizare (valabil și pentru cazurile Nouă și Mutare)
             $stmt_noua = $pdo->prepare("
                 INSERT INTO repartizare (id_student, id_camera, data_repartizare, activ)
                 VALUES (?, ?, ?, 1)
@@ -90,7 +79,7 @@ if (isset($_POST['repartizeaza'])) {
             
             if ($este_mutare) {
                  $_SESSION['message'] = "Studentul a fost mutat cu succes! Locuri libere rămase în camera nouă: " . $locuri_ramase;
-            } else { // Cazul Nouă
+            } else { 
                  $_SESSION['message'] = "Repartizare nouă efectuată cu succes! Locuri libere rămase: " . $locuri_ramase;
             }
 
@@ -106,12 +95,10 @@ if (isset($_POST['repartizeaza'])) {
     exit;
 }
 
-// --- 2. GESTIONARE ANULARE REPARTIZARE (Ștergere logică) ---
 if (isset($_GET['anuleaza'])) {
     $id_repartizare = intval($_GET['anuleaza']);
     
     try {
-        // Setăm 'activ' pe 0 pentru a anula repartizarea (ștergere logică)
         $stmt = $pdo->prepare("
             UPDATE repartizare 
             SET activ = 0 
@@ -128,10 +115,6 @@ if (isset($_GET['anuleaza'])) {
     exit;
 }
 
-
-// --- Preluare date pentru formulare și listare ---
-
-// Preluare TOȚI studenții cu statutul lor de repartizare
 $studenti_toti = $pdo->query("
     SELECT 
         s.id_student, 
@@ -149,7 +132,6 @@ $studenti_toti = $pdo->query("
     ORDER BY s.nume, s.prenume
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// Toate camerele disponibile (cu cel puțin 1 loc liber)
 $camere_disponibile_sql = "
     SELECT 
         c.id_camera, 
@@ -170,7 +152,6 @@ $camere_disponibile_sql = "
 
 $camere_disponibile = $pdo->query($camere_disponibile_sql)->fetchAll(PDO::FETCH_ASSOC);
 
-// Preluare lista repartizări active (pentru afișarea în tabel)
 $repartizari_active = $pdo->query("
     SELECT 
         r.id_repartizare, 
@@ -200,7 +181,6 @@ $repartizari_active = $pdo->query("
     <meta charset="UTF-8">
     <title>Repartizare Studenți</title>
     <style>
-        /* Stiluri de bază, preluate din styles.css, adaptate pentru containerul iframe */
         body { 
             background: transparent; 
             font-family: Arial, sans-serif; 
@@ -214,7 +194,7 @@ $repartizari_active = $pdo->query("
             margin-bottom: 25px; 
         }
         h2 { 
-            color: #059669; /* Verde închis */
+            color: #059669; 
             border-bottom: 3px solid #10b981; 
             padding-bottom: 10px; 
             margin-bottom: 25px; 
@@ -225,7 +205,6 @@ $repartizari_active = $pdo->query("
              margin-bottom: 20px;
         }
 
-        /* --- Formularea îmbunătățită --- */
         .form-repartizare {
             display: flex;
             flex-wrap: wrap;
@@ -233,7 +212,7 @@ $repartizari_active = $pdo->query("
             padding: 20px;
             border: 1px solid #d1fae5;
             border-radius: 10px;
-            background: #f0fdfa; /* Un verde foarte deschis */
+            background: #f0fdfa; 
         }
         
         .form-repartizare > div {
@@ -258,7 +237,6 @@ $repartizari_active = $pdo->query("
             box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
         }
         
-        /* Stil pentru grupurile de opțiuni (Nerepartizați/Repartizați) */
         optgroup {
             font-weight: bold;
             color: #374151;
@@ -282,7 +260,6 @@ $repartizari_active = $pdo->query("
             background: #0d9467;
         }
 
-        /* --- Buton Anulare --- */
         .btn-danger {
             background: #ef4444;
             color: white;
@@ -297,7 +274,6 @@ $repartizari_active = $pdo->query("
             background: #dc2626;
         }
         
-        /* --- Mesaje --- */
         .alert { 
             padding: 15px; 
             border-radius: 8px; 
@@ -316,7 +292,6 @@ $repartizari_active = $pdo->query("
             border-color: #fecaca; 
         }
 
-        /* --- Tabel --- */
         table { 
             width: 100%; 
             border-collapse: collapse; 
@@ -352,7 +327,6 @@ $repartizari_active = $pdo->query("
 <div class="container">
     <h2>Gestionare Repartizări Cămine</h2>
 
-    <!-- Mesaje de Stare -->
     <?php if ($success_message): ?>
         <div class="alert alert-success"><?= htmlspecialchars($success_message) ?></div>
     <?php endif; ?>
@@ -361,7 +335,6 @@ $repartizari_active = $pdo->query("
         <div class="alert alert-danger"><?= htmlspecialchars($error_message) ?></div>
     <?php endif; ?>
 
-    <!-- Formular de Repartizare/Mutare -->
     <form method="POST" class="form-repartizare">
         <h3>Adaugă Repartizare sau Mută un Student</h3>
         
@@ -419,7 +392,6 @@ $repartizari_active = $pdo->query("
     </form>
 </div>
 
-<!-- Secțiune Listă Repartizări Active -->
 <div class="container">
     <h3>Lista Repartizărilor Active</h3>
     
@@ -450,7 +422,6 @@ $repartizari_active = $pdo->query("
                         <td><?= number_format($r['tarif_pe_loc'], 2) ?></td>
                         <td><?= date('d.m.Y', strtotime($r['data_repartizare'])) ?></td>
                         <td>
-                            <!-- Folosim butonul de Anulare (Ștergere Logică) -->
                             <a href="?anuleaza=<?= $r['id_repartizare'] ?>" 
                                onclick="return confirm('Sigur anulezi repartizarea studentului <?= addslashes($r['nume'] . ' ' . $r['prenume']) ?>? Această acțiune nu poate fi anulată!');">
                                 <button type="button" class="btn-danger">Anulează</button>
