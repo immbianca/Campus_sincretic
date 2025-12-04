@@ -1,13 +1,26 @@
 <?php
+// Pornim sesiunea pentru a gestiona mesajele de stare (succes/eroare)
+session_start();
 include "db.php";
+
+$error_message = $_SESSION['error'] ?? '';
+$success_message = $_SESSION['message'] ?? '';
+unset($_SESSION['error'], $_SESSION['message']); 
 
 if (isset($_POST['add'])) {
     $nume = trim($_POST['nume_camin'] ?? '');
     $facultate = intval($_POST['id_facultate'] ?? 0);
 
     if ($nume !== '' && $facultate > 0) {
-        $stmt = $pdo->prepare("INSERT INTO camin (nume_camin, id_facultate) VALUES (?, ?)");
-        $stmt->execute([$nume, $facultate]);
+        try {
+            $stmt = $pdo->prepare("INSERT INTO camin (nume_camin, id_facultate) VALUES (?, ?)");
+            $stmt->execute([$nume, $facultate]);
+            $_SESSION['message'] = "Căminul a fost adăugat cu succes.";
+        } catch (PDOException $e) {
+             $_SESSION['error'] = "Eroare la adăugarea căminului: " . $e->getMessage();
+        }
+    } else {
+         $_SESSION['error'] = "Toate câmpurile sunt obligatorii.";
     }
 
     header("Location: camine.php");
@@ -16,8 +29,13 @@ if (isset($_POST['add'])) {
 
 if (isset($_GET['delete'])) {
     $id = intval($_GET['delete']);
-    $stmt = $pdo->prepare("DELETE FROM camin WHERE id_camin = ?");
-    $stmt->execute([$id]);
+    try {
+        $stmt = $pdo->prepare("DELETE FROM camin WHERE id_camin = ?");
+        $stmt->execute([$id]);
+        $_SESSION['message'] = "Căminul a fost șters cu succes. Toate camerele și repartizările asociate au fost anulate.";
+    } catch (PDOException $e) {
+         $_SESSION['error'] = "Eroare la ștergerea căminului: " . $e->getMessage();
+    }
     header("Location: camine.php");
     exit;
 }
@@ -34,16 +52,17 @@ if ($filtru > 0) {
     $params[] = $filtru;
 }
 
+// Interogare pentru a prelua căminele împreună cu numărul de camere și locuri
 $sql = "
     SELECT 
-        c.id_camin,
-        c.nume_camin,
+        c.id_camin, 
+        c.nume_camin, 
         f.nume_facultate,
-        COUNT(cam.id_camera) AS nr_camere,
-        COALESCE(SUM(cam.nr_locuri_total), 0) AS total_locuri
+        COUNT(ca.id_camera) AS nr_camere,
+        SUM(ca.nr_locuri_total) AS total_locuri
     FROM camin c
-    LEFT JOIN facultate f ON c.id_facultate = f.id_facultate
-    LEFT JOIN camera cam ON c.id_camin = cam.id_camin
+    JOIN facultate f ON c.id_facultate = f.id_facultate
+    LEFT JOIN camera ca ON c.id_camin = ca.id_camin
     $where
     GROUP BY c.id_camin
     ORDER BY c.nume_camin
@@ -52,164 +71,213 @@ $sql = "
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $camine = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
 ?>
+
 <!DOCTYPE html>
 <html lang="ro">
 <head>
-<meta charset="UTF-8">
-<title>Camine</title>
+    <meta charset="UTF-8">
+    <title>Cămine</title>
+    <style>
+        /* Stiluri de bază */
+        body { 
+            background: transparent; 
+            font-family: Arial, sans-serif; 
+            padding: 20px; 
+        }
+        .container { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 12px; 
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1); 
+            margin-bottom: 25px;
+        }
+        h2 { 
+            color: #059669; /* Verde închis */
+            border-bottom: 3px solid #10b981; 
+            padding-bottom: 10px; 
+            margin-bottom: 25px; 
+        }
 
-<style>
-body {
-    background: transparent;
-    font-family: Arial, sans-serif;
-    padding: 20px;
-}
+        /* Formulare */
+        .form-container, .filter-container { 
+            display: flex; 
+            gap: 15px; 
+            margin-bottom: 20px; 
+            align-items: center; 
+            padding: 20px;
+            border: 1px solid #d1fae5;
+            border-radius: 10px;
+            background: #f0fdfa;
+        }
+        .form-container input, .form-container select, .filter-container select { 
+            padding: 10px; 
+            border: 1px solid #34d399; 
+            border-radius: 8px; 
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
+            min-width: 200px;
+        }
+        .form-container label {
+             font-weight: 600; 
+             color: #059669;
+        }
 
-.page-title {
-    font-size: 22px;
-    margin-bottom: 15px;
-}
+        /* Butoane */
+        .btn { 
+            padding: 10px 15px; 
+            background: #10b981; 
+            border: none; 
+            color: white; 
+            cursor: pointer; 
+            border-radius: 8px;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        .btn:hover { 
+            background: #0d9467; 
+        }
+        .btn-danger { 
+            background: #ef4444; 
+        }
+        .btn-danger:hover { 
+            background: #dc2626; 
+        }
+        .btn-primary {
+             background: #3b82f6;
+        }
+        .btn-primary:hover {
+             background: #2563eb;
+        }
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 0.85rem;
+        }
 
-.layout {
-    display: grid;
-    grid-template-columns: 1.2fr 2.5fr;
-    gap: 20px;
-}
+        /* Tabel */
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 20px; 
+        }
+        th, td { 
+            border: 1px solid #e5e7eb; 
+            padding: 12px; 
+            text-align: left; 
+        }
+        th { 
+            background-color: #f3f4f6; 
+            color: #374151;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+        }
+        tr:nth-child(even) { 
+            background-color: #f9fafb; 
+        }
 
-.card {
-    background: white;
-    padding: 18px;
-    border-radius: 12px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
-}
+        .action-buttons button {
+            margin-right: 5px;
+        }
+        
+        /* Mesaje de Stare */
+        .alert { 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin-bottom: 20px; 
+            font-weight: bold; 
+            border: 1px solid transparent;
+        }
+        .alert-success { 
+            background-color: #d1fae5; 
+            color: #065f46; 
+            border-color: #a7f3d0; 
+        }
+        .alert-danger { 
+            background-color: #fee2e2; 
+            color: #991b1b; 
+            border-color: #fecaca; 
+        }
 
-h3 { margin-top: 0; }
-
-input[type="text"],
-select {
-    width: 100%;
-    padding: 7px 8px;
-    border-radius: 8px;
-    border: 1px solid #cbd5e1;
-    font-size: 14px;
-    margin-bottom: 10px;
-}
-
-button {
-    padding: 8px 14px;
-    border-radius: 8px;
-    border: none;
-    cursor: pointer;
-    font-size: 14px;
-}
-
-.btn-primary { background: #10b981; color: white; }
-.btn-primary:hover { background: #0e8f6d; }
-
-.btn-danger { background: #e11d48; color: white; }
-.btn-danger:hover { background: #b31038; }
-
-.btn-small { padding: 5px 10px; font-size: 13px; }
-
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 8px;
-}
-
-th, td {
-    padding: 8px 10px;
-    border-bottom: 1px solid #e5e7eb;
-}
-
-th {
-    background: #10b981;
-    color: white;
-    text-align: left;
-}
-
-tr:nth-child(even) td { background: #f9fafb; }
-
-.action-buttons {
-    display: flex;
-    gap: 6px;
-}
-</style>
+    </style>
 </head>
-
 <body>
 
-<h2 class="page-title">Evidență Cămine</h2>
+<div class="container">
+    <h2>Gestionare Cămine</h2>
 
-<div class="layout">
+    <!-- Mesaje de Stare -->
+    <?php if ($success_message): ?>
+        <div class="alert alert-success"><?= htmlspecialchars($success_message) ?></div>
+    <?php endif; ?>
 
-    <div class="card">
-        <h3>Adaugă cămin</h3>
+    <?php if ($error_message): ?>
+        <div class="alert alert-danger"><?= htmlspecialchars($error_message) ?></div>
+    <?php endif; ?>
 
-        <form method="POST">
-            <label>Nume cămin</label>
-            <input type="text" name="nume_camin" required>
+    <!-- Formular adăugare -->
+    <form method="POST" class="form-container">
+        <label for="nume_camin">Nume Cămin:</label>
+        <input type="text" name="nume_camin" id="nume_camin" placeholder="Ex: Cămin P1" required>
+        
+        <label for="id_facultate">Facultate Aferentă:</label>
+        <select name="id_facultate" id="id_facultate" required>
+            <option value="">-- Selectează Facultatea --</option>
+            <?php foreach ($facultati as $f): ?>
+                <option value="<?= $f['id_facultate'] ?>">
+                    <?= htmlspecialchars($f['nume_facultate']) ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+        <button type="submit" name="add" class="btn">Adaugă Cămin</button>
+    </form>
+    
+    <!-- Filtru Cămine -->
+    <form method="GET" class="filter-container">
+        <label for="facultate_filter">Filtrează după Facultate:</label>
+        <select name="facultate_filter" id="facultate_filter" onchange="this.form.submit()">
+            <option value="0">Toate Facultățile</option>
+            <?php foreach ($facultati as $f): ?>
+                <option value="<?= $f['id_facultate'] ?>" <?= $filtru == $f['id_facultate'] ? 'selected' : '' ?>>
+                    <?= htmlspecialchars($f['nume_facultate']) ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+         <a href="tip_camera.php" style="margin-left: auto;"><button type="button" class="btn btn-primary">Configurare Tipuri Camere</button></a>
+    </form>
 
-            <label>Facultate</label>
-            <select name="id_facultate" required>
-                <option value="">Alege facultate</option>
-                <?php foreach ($facultati as $f): ?>
-                    <option value="<?= $f['id_facultate'] ?>">
-                        <?= htmlspecialchars($f['nume_facultate']) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
 
-            <button type="submit" name="add" class="btn-primary">Adaugă cămin</button>
-        </form>
-    </div>
-
-    <div class="card">
-        <h3>Lista căminelor</h3>
-
-        <form method="GET">
-            <select name="facultate_filter" onchange="this.form.submit()">
-                <option value="0">Toate facultățile</option>
-                <?php foreach ($facultati as $f): ?>
-                    <option value="<?= $f['id_facultate'] ?>" 
-                        <?= ($filtru == $f['id_facultate']) ? 'selected' : '' ?>>
-                        <?= htmlspecialchars($f['nume_facultate']) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-        </form>
-
-        <table>
+    <!-- Tabel cămine -->
+    <table>
+        <thead>
             <tr>
                 <th>ID</th>
                 <th>Cămin</th>
                 <th>Facultate</th>
-                <th>Nr camere</th>
-                <th>Total locuri</th>
+                <th>Nr. Camere</th>
+                <th>Total Locuri</th>
                 <th>Acțiuni</th>
             </tr>
+        </thead>
 
             <?php if (empty($camine)): ?>
-                <tr><td colspan="6">Nu există cămine.</td></tr>
+                <tr><td colspan="6" style="text-align: center;">Nu există cămine.</td></tr>
 
             <?php else: ?>
                 <?php foreach ($camine as $c): ?>
                     <tr>
                         <td><?= $c['id_camin'] ?></td>
-                        <td><?= htmlspecialchars($c['nume_camin']) ?></td>
+                        <td><strong><?= htmlspecialchars($c['nume_camin']) ?></strong></td>
                         <td><?= htmlspecialchars($c['nume_facultate']) ?></td>
-                        <td><?= $c['nr_camere'] ?></td>
-                        <td><?= $c['total_locuri'] ?></td>
+                        <td><?= (int)$c['nr_camere'] ?></td>
+                        <td><?= (int)$c['total_locuri'] ?></td>
 
                         <td class="action-buttons">
+                            <!-- AICI ESTE CORECTAREA: trimite la camere.php -->
                             <a href="camere.php?camin=<?= $c['id_camin'] ?>">
                                 <button class="btn-small btn-primary">Camere</button>
                             </a>
 
                             <a href="?delete=<?= $c['id_camin'] ?>"
-                               onclick="return confirm('Sigur ștergi acest cămin?');">
+                               onclick="return confirm('Sigur ștergi acest cămin? Atenție: Această acțiune șterge toate camerele și repartizările asociate!');">
                                 <button class="btn-small btn-danger">Șterge</button>
                             </a>
                         </td>
