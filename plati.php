@@ -7,13 +7,12 @@ include "db.php";
 $error_message = $_SESSION['error'] ?? '';
 $success_message = $_SESSION['message'] ?? '';
 unset($_SESSION['error'], $_SESSION['message']); // Ștergem mesajele după afișare
-=======
+
 if (isset($_POST['add_chitanta'])) {
     $id_student = intval($_POST['id_student'] ?? 0);
     $suma_platita = floatval($_POST['suma_platita'] ?? 0);
     $perioada = trim($_POST['perioada'] ?? '');
     $data_emiterii = date('Y-m-d'); 
->>>>>>> Stashed changes
 
 // --- 1. GESTIONARE ADĂUGARE PLATĂ ---
 if (isset($_POST['adauga_plata'])) {
@@ -57,18 +56,12 @@ if (isset($_POST['adauga_plata'])) {
     exit;
 }
 
-<<<<<<< Updated upstream
-// --- Preluare date pentru formulare și listare ---
-
-// Studenții repartizați (cei care pot efectua plăți de cazare)
-=======
 session_start();
 $message = $_SESSION['message'] ?? '';
 $error = $_SESSION['error'] ?? '';
 unset($_SESSION['message'], $_SESSION['error']);
 
 
->>>>>>> Stashed changes
 $studenti_repartizati = $pdo->query("
     SELECT 
         s.id_student, 
@@ -86,15 +79,12 @@ $studenti_repartizati = $pdo->query("
     ORDER BY s.nume, s.prenume
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-<<<<<<< Updated upstream
 // Lista completă a chitanțelor
 // Am adăugat coloana CNP pentru a avea o identificare mai clară
 $chitante = $pdo->query("
-=======
 
 $incasari = [];
 $incasari_sql = "
->>>>>>> Stashed changes
     SELECT 
         ch.id_chitanta, 
         s.nume, 
@@ -263,14 +253,11 @@ $incasari_sql = "
         <div class="alert alert-danger"><?= htmlspecialchars($error_message) ?></div>
     <?php endif; ?>
 
-<<<<<<< Updated upstream
     <!-- Formular de Adăugare Plată -->
     <form method="POST" class="form-plata">
         <h3>Înregistrează o nouă chitanță</h3>
         
-=======
     <form method="POST">
->>>>>>> Stashed changes
         <div class="form-group">
             <label for="id_student">Selectează Studentul (doar cei repartizați):</label>
             <select name="id_student" id="id_student" required>
@@ -306,17 +293,12 @@ $incasari_sql = "
     </div>
 </div>
 
-<<<<<<< Updated upstream
 <!-- Secțiune Istoric Plăți -->
-=======
->>>>>>> Stashed changes
 <div class="container">
     <h3>Istoric Plăți (Chitanțe)</h3>
     
-<<<<<<< Updated upstream
     <table>
         <thead>
-=======
     <?php if (empty($incasari)): ?>
         <p>Nu există încăsări înregistrate.</p>
     <?php else: ?>
@@ -339,7 +321,6 @@ $incasari_sql = "
         <p>Toți studenții repartizați și-au acoperit datoria minimă (exemplu: 10 luni de cazare).</p>
     <?php else: ?>
         <table>
->>>>>>> Stashed changes
             <tr>
                 <th>ID Chitanță</th>
                 <th>Nume Student</th>
