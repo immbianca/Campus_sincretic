@@ -1,7 +1,6 @@
 <?php
 include "db.php";
 
-// Adăugare facultate
 if (isset($_POST['add'])) {
     $nume = trim($_POST['nume']);
     if ($nume != "") {
@@ -10,13 +9,11 @@ if (isset($_POST['add'])) {
     }
 }
 
-// Ștergere facultate
 if (isset($_GET['delete'])) {
     $id = intval($_GET['delete']);
     $pdo->prepare("DELETE FROM facultate WHERE id_facultate = ?")->execute([$id]);
 }
 
-// Obținere lista facultăți
 $facultati = $pdo->query("SELECT * FROM facultate ORDER BY id_facultate DESC")->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
@@ -85,13 +82,11 @@ $facultati = $pdo->query("SELECT * FROM facultate ORDER BY id_facultate DESC")->
 <div class="container">
     <h2>Gestionare Facultăți</h2>
 
-    <!-- Formular adăugare -->
     <form method="POST">
         <input type="text" name="nume" placeholder="Nume facultate" required>
         <button type="submit" name="add">Adaugă</button>
     </form>
 
-    <!-- Tabel facultăți -->
     <table>
         <tr>
             <th>ID</th>
