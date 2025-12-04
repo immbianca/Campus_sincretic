@@ -142,12 +142,18 @@ $camine = $stmt->fetchAll(PDO::FETCH_ASSOC);
         .btn-danger:hover { 
             background: #dc2626; 
         }
-        .btn-primary {
-             background: #3b82f6;
+        
+        /* NOU: Stil pentru butoanele care erau anterior albastre - Nuanța Smarald */
+        .btn-info-green {
+            background: #059669; /* Verde Smarald: S-a potrivit cu imaginea */
+            color: white; 
+            box-shadow: 0 4px 6px rgba(5, 150, 105, 0.2); /* Adaugă o umbră subtilă */
         }
-        .btn-primary:hover {
-             background: #2563eb;
+        .btn-info-green:hover {
+            background: #047857; /* Verde mai închis la hover */
         }
+        /* Am eliminat stilurile .btn-primary care erau albastre */
+
         .btn-small {
             padding: 6px 12px;
             font-size: 0.85rem;
@@ -241,7 +247,8 @@ $camine = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 </option>
             <?php endforeach; ?>
         </select>
-         <a href="tip_camera.php" style="margin-left: auto;"><button type="button" class="btn btn-primary">Configurare Tipuri Camere</button></a>
+        <!-- AICI S-A SCHIMBAT CLASA: btn-primary -> btn-info-green -->
+        <a href="tip_camera.php" style="margin-left: auto;"><button type="button" class="btn btn-info-green">Configurare Tipuri Camere</button></a>
     </form>
 
 
@@ -271,9 +278,9 @@ $camine = $stmt->fetchAll(PDO::FETCH_ASSOC);
                         <td><?= (int)$c['total_locuri'] ?></td>
 
                         <td class="action-buttons">
-                            <!-- AICI ESTE CORECTAREA: trimite la camere.php -->
+                            <!-- AICI S-A SCHIMBAT CLASA: btn-primary -> btn-info-green -->
                             <a href="camere.php?camin=<?= $c['id_camin'] ?>">
-                                <button class="btn-small btn-primary">Camere</button>
+                                <button class="btn-small btn-info-green">Camere</button>
                             </a>
 
                             <a href="?delete=<?= $c['id_camin'] ?>"

@@ -66,7 +66,7 @@ if (isset($_GET['delete'])) {
         $stmt->execute([$id_camera]);
         $_SESSION['message'] = "Camera a fost ștearsă cu succes. Eventualele repartizări asociate au fost anulate.";
     } catch (PDOException $e) {
-         $_SESSION['error'] = "Eroare la ștergere: " . $e->getMessage();
+           $_SESSION['error'] = "Eroare la ștergere: " . $e->getMessage();
     }
     header("Location: camere.php?camin=$id_camin");
     exit;
@@ -100,6 +100,7 @@ $lista_camere = $camere->fetchAll(PDO::FETCH_ASSOC);
     <meta charset="UTF-8">
     <title>Camere: <?= $nume_camin ?></title>
     <style>
+        /* Stiluri de bază */
         body { background: transparent; font-family: Arial, sans-serif; padding: 20px; }
         .container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 6px 15px rgba(0, 0, 0, 0.1); margin-bottom: 25px; }
         h2 { color: #059669; border-bottom: 3px solid #10b981; padding-bottom: 10px; margin-bottom: 25px; }
@@ -119,19 +120,27 @@ $lista_camere = $camere->fetchAll(PDO::FETCH_ASSOC);
             box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
         }
 
-        .form-add .btn-submit {
-            padding: 10px 25px;
-            background: #10b981;
+        /* Butoane generice */
+        .btn-green { /* Noua clasă pentru butoane verzi (inclusiv Înapoi) */
+            padding: 10px 15px;
+            background: #059669; /* Verde Smarald */
             color: white;
             border: none;
             border-radius: 8px;
             cursor: pointer;
             font-weight: bold;
-            transition: background 0.3s;
+            transition: background 0.3s, box-shadow 0.3s;
+            box-shadow: 0 4px 6px rgba(5, 150, 105, 0.2);
+        }
+        .btn-green:hover { background: #047857; }
+
+
+        .form-add .btn-submit {
+             /* Folosim stilul de bază .btn-green și ajustăm paddingul unde este necesar */
+            padding: 10px 25px;
             align-self: flex-end; 
             min-width: 150px;
         }
-        .form-add .btn-submit:hover { background: #0d9467; }
 
         /* Mesaje de Stare */
         .alert { padding: 15px; border-radius: 8px; margin-bottom: 20px; font-weight: bold; border: 1px solid transparent; }
@@ -154,7 +163,11 @@ $lista_camere = $camere->fetchAll(PDO::FETCH_ASSOC);
 <body>
 
 <div class="container">
-    <a href="camine.php" style="float: right; text-decoration: none;"><button style="background: #3b82f6; color: white; padding: 8px 15px; border: none; border-radius: 6px; cursor: pointer;">&larr; Înapoi la Cămine</button></a>
+    <!-- BUTON ÎNAPOI ACTUALIZAT -->
+    <a href="camine.php" style="float: right; text-decoration: none;">
+        <button class="btn-green">&larr; Înapoi la Cămine</button>
+    </a>
+    
     <h2>Gestionare Camere</h2>
     <h3 class="camin-header">Cămin: <?= $nume_camin ?></h3>
 
@@ -187,7 +200,8 @@ $lista_camere = $camere->fetchAll(PDO::FETCH_ASSOC);
                 <?php endif; ?>
             </select>
         </div>
-        <input type="submit" name="add_camera" value="Adaugă Cameră" class="btn-submit">
+        <!-- Folosim clasa btn-green aici, fiind extinsă prin .form-add .btn-submit -->
+        <input type="submit" name="add_camera" value="Adaugă Cameră" class="btn-submit btn-green">
     </form>
 
     <!-- Tabel Camere -->
@@ -224,7 +238,7 @@ $lista_camere = $camere->fetchAll(PDO::FETCH_ASSOC);
                         <td>
                             <a href="?camin=<?= $id_camin ?>&delete=<?= $c['id_camera'] ?>"
                                onclick="return confirm('Sigur ștergi camera <?= $c['nr_camera'] ?>? Toate repartizările din ea vor fi anulate!');">
-                                <button type="button" class="btn-danger">Șterge</button>
+                                 <button type="button" class="btn-danger">Șterge</button>
                             </a>
                         </td>
                     </tr>
