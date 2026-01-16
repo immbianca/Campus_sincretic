@@ -1,6 +1,7 @@
 <?php
 session_start();
 include "db.php";
+/** @var PDO $pdo */
 
 $error_message = $_SESSION['error'] ?? '';
 $success_message = $_SESSION['message'] ?? '';

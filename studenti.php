@@ -1,5 +1,6 @@
 <?php
 include "db.php";
+/** @var PDO $pdo */
 
 if (isset($_POST['add'])) {
     $nume      = trim($_POST['nume'] ?? '');

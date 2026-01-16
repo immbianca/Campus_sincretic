@@ -2,7 +2,7 @@
 
 $host = "localhost";
 $user = "root";
-$pass = "";
+$pass = "b2005";
 $dbname = "campus_db"; // Numele bazei de date
 
 try {

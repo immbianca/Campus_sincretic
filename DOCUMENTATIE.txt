@@ -1,0 +1,109 @@
+TITLU TEMĂ:
+TEMA 3 - Baza de date pentru evidența locurilor de cazare într-un campus universitar, repartizarea studenților în camere.
+
+ECHIPA DE PROIECT:
+1. Moț-Loga Florian
+2. Mustea Bianca-Maria
+3. Popovici Darius
+
+DESCRIEREA BAZEI DE DATE:
+Proiectul utilizează o bază de date relațională (MySQL) numită "campus_db", structurată pentru a gestiona eficient entitățile universitare.
+
+Tabele Principale:
+1. `facultate`: Reține lista facultăților.
+   - Structură: id_facultate (PK), nume_facultate.
+2. `camin`: Reține căminele, fiecare fiind asociat unei facultăți.
+   - Structură: id_camin (PK), nume_camin, id_facultate (FK).
+3. `tip_camera`: Definește tipurile de camere (nr. paturi, tarif/loc).
+   - Structură: id_tip_camera (PK), nr_paturi, tarif_pe_loc.
+4. `camera`: Reține camerele fizice, asociate unui cămin și unui tip de cameră.
+   - Structură: id_camera (PK), id_camin (FK), id_tip_camera (FK), nr_camera, nr_locuri_total.
+5. `student`: Datele personale ale studenților, asociați unei facultăți.
+   - Structură: id_student (PK), nume, prenume, CNP, anul_studiu, id_facultate (FK).
+6. `repartizare`: Tabela de legătură între `student` și `camera`.
+   - Structură: id_repartizare (PK), id_student (FK), id_camera (FK), data_repartizare, activ.
+7. `chitanta`: Înregistrează plățile efectuate de studenți.
+   - Structură: id_chitanta (PK), id_student (FK), perioada, data_emiterii, suma_platita.
+
+Legături (Relații):
+- Un student aparține unei singure facultăți (1:N).
+- Un cămin este alocat unei facultăți (1:N).
+- O cameră aparține unui cămin (1:N) și are un anumit tip (1:N).
+- Un student poate avea o repartizare activă într-o cameră (1:N).
+- Un student poate avea mai multe chitanțe (1:N).
+
+PRELUCRĂRI ȘI FUNCȚIONALITĂȚI IMPLEMENTATE:
+Aplicația este dezvoltată în PHP (folosind PDO pentru securitate) și oferă o interfață web pentru gestionarea campusului.
+
+1. Gestiunea Studenților (studenti.php):
+   - Adăugare, ștergere și vizualizare studenți.
+   - Filtrare avansată după Facultate și Cămin.
+   - Căutare după nume.
+
+   Exemplu cod filtrare (studenti.php):
+   ```php
+   if ($filtru_facultate > 0) {
+       $where[]  = 's.id_facultate = ?';
+       $params[] = $filtru_facultate;
+   }
+   // ...
+   $sql_studenti = "
+       SELECT s.id_student, s.nume, s.prenume, f.nume_facultate, ca.nume_camin
+       FROM student s
+       LEFT JOIN facultate f ON s.id_facultate = f.id_facultate
+       LEFT JOIN repartizare r ON s.id_student = r.id_student AND r.activ = 1
+       LEFT JOIN camera cam ON r.id_camera = cam.id_camera
+       LEFT JOIN camin ca ON cam.id_camin = ca.id_camin
+       $where_sql
+   ";
+   ```
+
+2. Gestiunea Căminelor și Camerelor (camine.php, camere.php):
+   - Evidența căminelor pe facultăți.
+   - Vizualizarea gradului de ocupare (locuri totale vs. locuri ocupate).
+
+   Exemplu cod calcul locuri (camine.php):
+   ```php
+   $sql = "
+       SELECT c.nume_camin, COUNT(ca.id_camera) AS nr_camere, SUM(ca.nr_locuri_total) AS total_locuri
+       FROM camin c
+       LEFT JOIN camera ca ON c.id_camin = ca.id_camin
+       GROUP BY c.id_camin
+   ";
+   ```
+
+3. Financiar și Plăți (plati.php):
+   - Calcul automat al restanțelor: (Tarif Cameră * Luni) - Total Plătit.
+   - Generare rapoarte financiare pe perioade.
+   - Înregistrarea plăților și generarea automată a chitanțelor.
+
+   Exemplu cod calcul restanță (plati.php):
+   ```php
+   function calculeazaRestanta($pdo, $id_student, $luni) {
+       // 1. Luăm tariful camerei
+       $stmt = $pdo->prepare("SELECT tc.tarif_pe_loc FROM repartizare r ... JOIN tip_camera tc ...");
+       // 2. Calculăm cât a plătit
+       $stmt_p = $pdo->prepare("SELECT SUM(suma_platita) FROM chitanta WHERE id_student = ?");
+
+       $datorat = $tarif * $luni;
+       $restant = max(0, $datorat - $platit);
+       return ['datorat' => $datorat, 'platit' => $platit, 'restant' => $restant];
+   }
+   ```
+
+CERINȚE REALIZATE:
+[x] Evidența operativă a studenților pe facultăți și căutări rapide.
+    - Realizat prin filtrele și search-ul din `studenti.php`.
+[x] Evidența căminelor pe facultăți și a locurilor libere.
+    - Realizat în `camine.php` și `camere.php` (afișare badge-uri cu locuri libere).
+[x] Listarea căminelor cu anumite tipuri de camere.
+    - Realizat prin vizualizarea detaliată a camerelor și a tipurilor acestora.
+[x] Situații cu încasările și sumele rămase de încasat (liste studenți-sume).
+    - Realizat complet în `plati.php` (tabelul de situație financiară).
+[x] Interfață prietenoasă.
+    - Realizat folosind CSS modern, design responsive și meniuri intuitive.
+[x] Eliberarea de chitanțe cu date din baza de date.
+    - Realizat: după adăugarea unei plăți, se generează chitanța specifică pentru printare.
+
+CERINȚE NEREALIZATE:
+- Niciuna. Toate cerințele minimale specificate în temă au fost implementate.

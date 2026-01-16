@@ -1,442 +1,258 @@
 <?php
 include "db.php";
+/** @var PDO $pdo */
 
-// Setări
-$TARIF_LUNI_AN = 10; // Presupunem un an academic de 10 luni (Septembrie - Iunie)
-$SEMESTRU_LUNI = 5;  // Presupunem un semestru de 5 luni
+// 1. LOGICA DE CALCUL PERIODICĂ
+$luni_calcul = isset($_GET['perioada_vizualizata']) ? intval($_GET['perioada_vizualizata']) : 10;
+if (!in_array($luni_calcul, [5, 10])) {
+    $luni_calcul = 10;
+}
+$nume_perioada = ($luni_calcul == 5) ? "Semestru (5 luni)" : "An Academic (10 luni)";
 
-// --- Funcții Utilitare pentru Calculul Restanțelor ---
-
-/**
- * Calculează suma totală datorată, suma plătită și restanța curentă pentru un student.
- * Se bazează pe tariful lunar și pe presupunerea unui an academic de 10 luni.
- *
- * @param PDO $pdo Obiectul de conexiune PDO.
- * @param int $studentId ID-ul studentului.
- * @return array {total_datorat, total_platit, restant, tarif_lunar}
- */
-function calculeazaRestantaStudent($pdo, $studentId) {
-    global $TARIF_LUNI_AN;
-
-    // 1. Obține tariful lunar curent (pe loc) și data repartizării active
+// 2. FUNCȚIE CALCUL RESTANȚĂ (Îmbunătățită)
+function calculeazaRestanta(PDO $pdo, int $id_student, int $luni): array {
+    // Luăm tariful lunar. Folosim INNER JOIN pentru a ne asigura că luăm doar unde există contract activ
+    /** @noinspection SqlNoDataSourceInspection */
     $stmt = $pdo->prepare("
-        SELECT
-            tc.tarif_pe_loc,
-            r.data_repartizare
+        SELECT tc.tarif_pe_loc 
         FROM repartizare r
-        JOIN camera c ON r.id_camera = c.id_camera
-        JOIN tip_camera tc ON c.id_tip_camera = tc.id_tip_camera
-        WHERE r.id_student = ? AND r.activ = 1
-        ORDER BY r.data_repartizare DESC
+        INNER JOIN camera c ON r.id_camera = c.id_camera
+        INNER JOIN tip_camera tc ON c.id_tip_camera = tc.id_tip_camera
+        WHERE r.id_student = ? AND r.activ = 1 
         LIMIT 1
     ");
-    $stmt->execute([$studentId]);
-    $repartizare = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stmt->execute([$id_student]);
+    $tarif = $stmt->fetchColumn();
 
-    if (!$repartizare) {
-        return [
-            'total_datorat' => 0.00,
-            'total_platit' => 0.00,
-            'restant' => 0.00,
-            'tarif_lunar' => 0.00,
-            'status' => 'Fără repartizare activă'
-        ];
+    // Dacă studentul NU este cazat nicăieri, datoria lui este 0
+    if ($tarif === false) {
+        $tarif = 0;
     }
 
-    $tarif_lunar = (float)$repartizare['tarif_pe_loc'];
-    $data_repartizare = $repartizare['data_repartizare'];
+    // Calculăm totalul plătit din tabelul chitanta
+    /** @noinspection SqlNoDataSourceInspection */
+    $stmt_p = $pdo->prepare("SELECT SUM(suma_platita) FROM chitanta WHERE id_student = ?");
+    $stmt_p->execute([$id_student]);
+    $platit = $stmt_p->fetchColumn() ?: 0;
 
-    // 2. Calculează suma totală Datorată
-    // Pentru simplitate, presupunem că un student datorează tariful lunar * 10 luni pentru anul curent.
-    // În aplicațiile reale, ar trebui să se calculeze prorata pe data curentă vs. data_repartizare.
-    $total_datorat = $tarif_lunar * $TARIF_LUNI_AN;
-
-    // 3. Calculează suma totală Plătită
-    $stmt_plati = $pdo->prepare("
-        SELECT SUM(suma_platita) AS total_platit
-        FROM chitanta
-        WHERE id_student = ?
-    ");
-    $stmt_plati->execute([$studentId]);
-    $plata_totala = $stmt_plati->fetch(PDO::FETCH_ASSOC)['total_platit'] ?? 0.00;
-    $total_platit = (float)$plata_totala;
-
-    // 4. Calculează Restanța
-    $restant = max(0.00, $total_datorat - $total_platit);
+    $datorat = (float)$tarif * $luni;
+    $restant = max(0, $datorat - (float)$platit);
 
     return [
-        'total_datorat' => $total_datorat,
-        'total_platit' => $total_platit,
-        'restant' => $restant,
-        'tarif_lunar' => $tarif_lunar,
-        'status' => 'Activ'
+            'datorat' => $datorat,
+            'platit'  => (float)$platit,
+            'restant' => $restant,
+            'tarif'   => (float)$tarif
     ];
 }
 
-
-// --- Acțiuni Formular (Adăugare Plată) ---
+// 3. SALVARE PLATĂ NOUĂ ȘI GENERARE CHITANȚĂ
+$chitanta_generata = null;
 if (isset($_POST['add_plat'])) {
-    $id_student = intval($_POST['id_student'] ?? 0);
-    $suma = (float)($_POST['suma_platita'] ?? 0.00);
-    $perioada = trim($_POST['perioada'] ?? '');
+    $id_s = intval($_POST['id_student']);
+    $suma = floatval($_POST['suma_platita']);
+    $per = "Plata " . $nume_perioada;
 
-    if ($id_student > 0 && $suma > 0 && $perioada !== '') {
-        try {
-            // Obține datele studentului pentru chitanță
-            $stmt_stud = $pdo->prepare("SELECT nume, prenume FROM student WHERE id_student = ?");
-            $stmt_stud->execute([$id_student]);
-            $student = $stmt_stud->fetch(PDO::FETCH_ASSOC);
-            
-            // Verifică dacă există studentul și adaugă plata
-            if ($student) {
-                $stmt = $pdo->prepare("
-                    INSERT INTO chitanta (id_student, perioada, data_emiterii, suma_platita)
-                    VALUES (?, ?, CURDATE(), ?)
-                ");
-                $stmt->execute([$id_student, $perioada, $suma]);
-                
-                // Opțional: Aici poți adăuga logica de generare a chitanței PDF/HTML.
-                // Pentru moment, doar redirecționăm.
-            }
-        } catch (PDOException $e) {
-            echo "<script>alert('Eroare la înregistrarea plății: " . addslashes($e->getMessage()) . "');</script>";
-        }
+    if ($id_s > 0 && $suma > 0) {
+        /** @noinspection SqlNoDataSourceInspection */
+        $stmt = $pdo->prepare("INSERT INTO chitanta (id_student, perioada, data_emiterii, suma_platita) VALUES (?, ?, CURDATE(), ?)");
+        $stmt->execute([$id_s, $per, $suma]);
+        
+        // Preluăm datele pentru chitanță
+        $last_id = $pdo->lastInsertId();
+        /** @noinspection SqlNoDataSourceInspection */
+        $stmt_student = $pdo->prepare("SELECT nume, prenume FROM student WHERE id_student = ?");
+        $stmt_student->execute([$id_s]);
+        $student_info = $stmt_student->fetch(PDO::FETCH_ASSOC);
+        
+        $chitanta_generata = [
+            'id' => $last_id,
+            'nume' => $student_info['nume'] . ' ' . $student_info['prenume'],
+            'suma' => $suma,
+            'data' => date('d.m.Y'),
+            'descriere' => $per
+        ];
     }
-    header("Location: plati.php?student=" . $id_student);
-    exit;
 }
 
-// --- Acțiuni Formular (Ștergere Plată) ---
-if (isset($_GET['delete_chitanta'])) {
-    $id_chitanta = intval($_GET['delete_chitanta']);
-    $stmt = $pdo->prepare("DELETE FROM chitanta WHERE id_chitanta = ?");
-    $stmt->execute([$id_chitanta]);
-    // Redirecționare la același student după ștergere
-    $student_id_redirect = intval($_GET['student'] ?? 0);
-    header("Location: plati.php?student=" . $student_id_redirect);
-    exit;
-}
-
-// --- Obținere Date pentru Afișare ---
-$student_selectat_id = isset($_GET['student']) ? intval($_GET['student']) : 0;
-$luni_anual = $TARIF_LUNI_AN;
-$luni_semestrial = $SEMESTRU_LUNI;
-
-// Lista de studenți pentru formularul de plată și tabele
-$studenti = $pdo->query("SELECT id_student, nume, prenume FROM student ORDER BY nume, prenume")->fetchAll(PDO::FETCH_ASSOC);
-
-// Obține lista de studenți cu detaliile de plată calculate
-$studenti_cu_restante = [];
-foreach ($studenti as $s) {
-    $date_plata = calculeazaRestantaStudent($pdo, $s['id_student']);
-    $studenti_cu_restante[] = array_merge($s, $date_plata);
-}
-
-// Detalii și Istoric Plăți pentru studentul selectat
-$istoric_plati = [];
-if ($student_selectat_id > 0) {
-    $stmt_istoric = $pdo->prepare("
-        SELECT * FROM chitanta 
-        WHERE id_student = ? 
-        ORDER BY data_emiterii DESC
-    ");
-    $stmt_istoric->execute([$student_selectat_id]);
-    $istoric_plati = $stmt_istoric->fetchAll(PDO::FETCH_ASSOC);
-
-    // Obține detalii complete student selectat
-    $stmt_detalii = $pdo->prepare("
-        SELECT 
-            s.nume, s.prenume, s.CNP, s.anul_studiu,
-            f.nume_facultate,
-            c.nume_camin, ca.nr_camera
-        FROM student s
-        LEFT JOIN facultate f ON s.id_facultate = f.id_facultate
-        LEFT JOIN repartizare r ON s.id_student = r.id_student AND r.activ = 1
-        LEFT JOIN camera ca ON r.id_camera = ca.id_camera
-        LEFT JOIN camin c ON ca.id_camin = c.id_camin
-        WHERE s.id_student = ?
-    ");
-    $stmt_detalii->execute([$student_selectat_id]);
-    $detalii_student = $stmt_detalii->fetch(PDO::FETCH_ASSOC);
-    
-    // Calculează starea financiară pentru studentul selectat
-    $stare_financiara = calculeazaRestantaStudent($pdo, $student_selectat_id);
-    $detalii_student = array_merge($detalii_student, $stare_financiara);
-}
-
-// --- Logica de Rapoarte ---
-$raport_incasari = [];
-try {
-    // Raport simplu de încasări pe an
-    $stmt_raport = $pdo->query("
-        SELECT 
-            YEAR(data_emiterii) AS an, 
-            SUM(suma_platita) AS total_incasat 
-        FROM chitanta 
-        GROUP BY an 
-        ORDER BY an DESC
-    ");
-    $raport_incasari = $stmt_raport->fetchAll(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
-    // În cazul în care baza de date e goală
-}
-
-
+// 4. PRELUARE LISTĂ STUDENȚI
+/** @noinspection SqlNoDataSourceInspection */
+$stmt_studenti = $pdo->query("SELECT id_student, nume, prenume FROM student ORDER BY nume ASC");
+$studenti = $stmt_studenti ? $stmt_studenti->fetchAll(PDO::FETCH_ASSOC) : [];
 ?>
 
 <!DOCTYPE html>
 <html lang="ro">
 <head>
     <meta charset="UTF-8">
-    <title>Plăți și Situație Financiară</title>
+    <title>Plăți Campus</title>
+    <link rel="stylesheet" href="styles.css">
     <style>
-        body { background: transparent; font-family: Arial, sans-serif; padding: 20px; }
-        .container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1); }
-        h2, h3 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-top: 20px; }
-        .grid-container { display: grid; grid-template-columns: 1fr 2fr; gap: 30px; margin-top: 20px; }
-        .form-card, .info-card { background: #f9f9f9; padding: 20px; border-radius: 8px; border: 1px solid #ddd; }
-        
-        /* Formular */
-        .form-card select, .form-card input[type="number"], .form-card input[type="text"] {
-            width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;
+        /* Adăugat position: relative și z-index pentru a fi deasupra fundalului animat din styles.css */
+        .container { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 12px; 
+            max-width: 1000px; 
+            margin: 20px auto; 
+            color: #333; 
+            position: relative; 
+            z-index: 10; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
-        .form-card button { background: #10b981; color: white; padding: 10px 15px; border: none; border-radius: 8px; cursor: pointer; transition: background 0.3s; }
-        .form-card button:hover { background: #0e8f6d; }
-
-        /* Tabele */
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
-        th { background: #f0f0f0; font-weight: bold; color: #333; }
-        tr:hover { background-color: #f5f5f5; }
-        .btn-small { padding: 5px 10px; font-size: 12px; border-radius: 6px; }
-        .btn-danger { background: #e11d48; color: white; border: none; }
-        .btn-danger:hover { background: #b31038; }
+        .no-print { background: #f8fafc; padding: 20px; margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 8px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
+        th, td { border: 1px solid #e2e8f0; padding: 12px; text-align: left; }
+        th { background: #f1f5f9; font-weight: 600; }
+        .restant { color: #e11d48; font-weight: bold; }
+        /* noinspection CssUnusedSymbol */
+        .ok { color: #10b981; font-weight: bold; }
+        .btn { cursor: pointer; padding: 10px 15px; border-radius: 5px; border: none; font-weight: 600; }
         
-        /* NOU: Stil pentru butonul verde (Detaliu/Istoric) */
-        .btn-success { background: #10b981; color: white; border: none; }
-        .btn-success:hover { background: #0e8f6d; }
+        .chitanta-print {
+            display: none;
+            border: 2px solid #333;
+            padding: 40px;
+            margin: 20px;
+            max-width: 800px;
+            font-family: 'Courier New', Courier, monospace;
+        }
 
-        /* Stiluri pentru restanțe/plăți */
-        .restant-zero { color: #10b981; font-weight: bold; }
-        .restant-pozitiv { color: #e11d48; font-weight: bold; }
-        .restant-status { font-weight: bold; padding: 4px 8px; border-radius: 4px; display: inline-block; }
-        .status-ok { background: #d1fae5; color: #065f46; }
-        .status-alert { background: #fee2e2; color: #991b1b; }
-
-        .details-list { list-style: none; padding: 0; margin: 10px 0; }
-        .details-list li { margin-bottom: 5px; padding: 5px 0; border-bottom: 1px dotted #eee; }
-        .details-list li strong { display: inline-block; width: 150px; }
-
-        /* Raporate */
-        .report-table { max-width: 400px; margin-top: 15px; }
-        .report-table th, .report-table td { text-align: center; }
-        .raport-section { margin-top: 40px; border-top: 1px solid #ddd; padding-top: 20px; }
-
+        @media print {
+            .no-print, nav, header, button, .btn, form, .situatie-financiara { display: none !important; }
+            body { background: white !important; }
+            .container { box-shadow: none; border: none; width: 100%; max-width: 100%; margin: 0; padding: 0; }
+            
+            /* Dacă avem o chitanță generată, o afișăm doar pe ea */
+            <?php if ($chitanta_generata): ?>
+            .chitanta-print { display: block !important; }
+            <?php else: ?>
+            /* Altfel afișăm tabelul */
+            .situatie-financiara { display: block !important; }
+            table { border: 1px solid #000; width: 100%; }
+            th, td { border: 1px solid #000; color: black; }
+            <?php endif; ?>
+            
+            /* Asigurăm că textul e negru la print */
+            * { color: black !important; }
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>Gestionarea Plăților și Situația Financiară a Studenților</h2>
+    
+    <?php if ($chitanta_generata): ?>
+    <div class="chitanta-print">
+        <h2 style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 10px;">CHITANȚĂ DE PLATĂ</h2>
+        <p><strong>Nr. Chitanță:</strong> #<?= str_pad($chitanta_generata['id'], 6, '0', STR_PAD_LEFT) ?></p>
+        <p><strong>Data:</strong> <?= $chitanta_generata['data'] ?></p>
+        <br>
+        <p><strong>Am primit de la:</strong> <?= htmlspecialchars($chitanta_generata['nume']) ?></p>
+        <p><strong>Suma de:</strong> <?= number_format($chitanta_generata['suma'], 2) ?> RON</p>
+        <p><strong>Reprezentând:</strong> <?= htmlspecialchars($chitanta_generata['descriere']) ?></p>
+        <br><br>
+        <div style="display: flex; justify-content: space-between; margin-top: 50px;">
+            <div>Casier,<br>..................</div>
+            <div>Semnătură plătitor,<br>..................</div>
+        </div>
+    </div>
+    
+    <div class="no-print" style="background: #dcfce7; border-color: #86efac; color: #166534;">
+        <h3>✅ Plată înregistrată cu succes!</h3>
+        <p>Chitanța a fost generată pentru <strong><?= htmlspecialchars($chitanta_generata['nume']) ?></strong>.</p>
+        <button onclick="window.print()" class="btn" style="background: #166534; color: white; margin-top: 10px;">
+            🖨️ Tipărește Chitanța Acum
+        </button>
+        <a href="plati.php" class="btn" style="background: #fff; border: 1px solid #166534; color: #166534; text-decoration: none; display: inline-block; margin-left: 10px;">
+            Înapoi la listă
+        </a>
+    </div>
+    <?php endif; ?>
 
-    <div class="grid-container">
-        <!-- Secțiunea 1: Adăugare Plată (Chitanță) -->
-        <div class="form-card">
-            <h3>Înregistrează Plată Nouă</h3>
-            <form method="POST" action="plati.php">
-                <label for="id_student">Selectează Student:</label>
-                <select name="id_student" id="id_student" required>
-                    <option value="">-- Alege Student --</option>
-                    <?php foreach ($studenti as $s): ?>
-                        <option value="<?= $s['id_student'] ?>" 
-                            <?= $student_selectat_id == $s['id_student'] ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($s['nume'] . " " . $s['prenume']) ?> (ID: <?= $s['id_student'] ?>)
-                        </option>
-                    <?php endforeach; ?>
+    <div class="situatie-financiara">
+        <h2 style="border-bottom: 2px solid #10b981; padding-bottom: 10px;">📊 Evidență Încasări Campus</h2>
+
+        <div class="no-print">
+            <form method="GET" style="margin-bottom: 15px;">
+                <label for="perioada_vizualizata" style="font-weight:bold;">Afișează raportul pentru:</label>
+                <select id="perioada_vizualizata" name="perioada_vizualizata" onchange="this.form.submit()" style="padding: 5px; border-radius: 4px; border: 1px solid #ccc;">
+                    <option value="10" <?= ($luni_calcul == 10) ? 'selected' : '' ?>>An Academic (10 luni)</option>
+                    <option value="5" <?= ($luni_calcul == 5) ? 'selected' : '' ?>>Semestru (5 luni)</option>
                 </select>
+            </form>
 
-                <label for="perioada">Perioada Plătită (ex: Semestrul I, Anual):</label>
-                <input type="text" name="perioada" id="perioada" required 
-                       placeholder="Ex: Semestrul I (<?= $luni_semestrial ?> luni)" value="Semestrul I" />
+            <button onclick="window.print()" class="btn" style="background: #3b82f6; color: white;">
+                🖨️ Tipărește Raport General PDF
+            </button>
+        </div>
 
-                <label for="suma_platita">Suma Plătită (RON):</label>
-                <input type="number" name="suma_platita" id="suma_platita" required min="1" step="0.01" 
-                       placeholder="Ex: 2500.00" />
-                
-                <button type="submit" name="add_plat">Emite Chitanță & Salvează</button>
+        <div class="no-print">
+            <h3>➕ Înregistrează Plată Nouă</h3>
+            <form method="POST" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <label for="id_student" style="display:none;">Student</label>
+                <select id="id_student" name="id_student" required style="padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+                    <option value="">-- Alege Student --</option>
+                    <?php if (empty($studenti)): ?>
+                        <option value="" disabled>Nu există studenți în baza de date</option>
+                    <?php else: ?>
+                        <?php foreach($studenti as $s): ?>
+                            <option value="<?= $s['id_student'] ?>"><?= htmlspecialchars($s['nume'] . " " . $s['prenume']) ?></option>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </select>
+                <label for="suma_platita" style="display:none;">Suma</label>
+                <input id="suma_platita" type="number" name="suma_platita" placeholder="Suma (RON)" step="0.01" required style="padding: 8px; width: 120px; border: 1px solid #ccc; border-radius: 4px;">
+                <button type="submit" name="add_plat" class="btn" style="background: #10b981; color:white;">Salvează Plata</button>
             </form>
         </div>
 
-        <!-- Secțiunea 2: Detalii și Istoric Plăți Student Selectat -->
-        <div class="info-card">
-            <?php if ($student_selectat_id > 0 && isset($detalii_student)): ?>
-                <h3>Detalii Financiare: <?= htmlspecialchars($detalii_student['nume'] . " " . $detalii_student['prenume']) ?></h3>
-                
-                <ul class="details-list">
-                    <li><strong>CNP:</strong> <?= htmlspecialchars($detalii_student['CNP'] ?? '-') ?></li>
-                    <li><strong>Facultate:</strong> <?= htmlspecialchars($detalii_student['nume_facultate'] ?? '-') ?></li>
-                    <li><strong>Cazare:</strong> <?= htmlspecialchars($detalii_student['nume_camin'] ?? '-') ?> / Camera: <?= htmlspecialchars($detalii_student['nr_camera'] ?? '-') ?></li>
-                    <li><strong>Tarif Lunar:</strong> <?= number_format($detalii_student['tarif_lunar'], 2) ?> RON</li>
-                </ul>
-
-                <p>
-                    <span class="restant-status status-ok">
-                        Datorat Total Anual (<?= $luni_anual ?> luni): 
-                        <?= number_format($detalii_student['total_datorat'], 2) ?> RON
-                    </span>
-                </p>
-                <p>
-                    <span class="restant-status status-ok">
-                        Plătit Total: 
-                        <?= number_format($detalii_student['total_platit'], 2) ?> RON
-                    </span>
-                </p>
-                <p>
-                    Restantă Curentă: 
-                    <span class="restant-status <?= $detalii_student['restant'] > 0 ? 'status-alert' : 'status-ok' ?>">
-                        <?= number_format($detalii_student['restant'], 2) ?> RON
-                    </span>
-                </p>
-
-                <h4>Istoric Plăți (Chitanțe)</h4>
-                <?php if (!empty($istoric_plati)): ?>
-                    <table>
-                        <tr>
-                            <th>ID Chitanță</th>
-                            <th>Perioadă</th>
-                            <th>Suma Plătită</th>
-                            <th>Data Emiterii</th>
-                            <th>Acțiuni</th>
-                        </tr>
-                        <?php foreach ($istoric_plati as $chitanta): ?>
-                            <tr>
-                                <td><?= $chitanta['id_chitanta'] ?></td>
-                                <td><?= htmlspecialchars($chitanta['perioada']) ?></td>
-                                <td><?= number_format($chitanta['suma_platita'], 2) ?> RON</td>
-                                <td><?= date('d.m.Y', strtotime($chitanta['data_emiterii'])) ?></td>
-                                <td>
-                                    <a href="?delete_chitanta=<?= $chitanta['id_chitanta'] ?>&student=<?= $student_selectat_id ?>" 
-                                       onclick="return confirm('Sigur ștergi chitanța #<?= $chitanta['id_chitanta'] ?>? Această acțiune va afecta restanța studentului.');">
-                                        <button class="btn-small btn-danger">Șterge</button>
-                                    </a>
-                                    <!-- Aici ar fi linkul pentru GENERARE CHITANȚĂ PDF/Vizualizare -->
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </table>
-                <?php else: ?>
-                    <p>Nu există plăți înregistrate pentru acest student.</p>
-                <?php endif; ?>
-            <?php else: ?>
-                <p>Selectează un student din lista de mai jos sau din formularul "Înregistrează Plată Nouă" pentru a vedea detaliile financiare și istoricul plăților.</p>
-            <?php endif; ?>
-        </div>
-    </div>
-
-
-    <!-- Secțiunea 3: Lista Studenților cu Restanțe Cumulate -->
-    <h2 style="margin-top: 40px;">Lista Studenților cu Situația Financiară (Restanțe Cumulate)</h2>
-    
-    <table>
-        <tr>
-            <th>ID</th>
-            <th>Nume Student</th>
-            <th>Tarif Lunar</th>
-            <th>Total Datorat (<?= $luni_anual ?> luni)</th>
-            <th>Total Plătit</th>
-            <th>Restantă</th>
-            <th>Acțiuni</th>
-        </tr>
-
-        <?php if (empty($studenti_cu_restante)): ?>
-            <tr><td colspan="7">Nu există studenți înregistrați.</td></tr>
+        <h3>Situație Financiară - Perioada: <span style="color: #10b981;"><?= $nume_perioada ?></span></h3>
+        
+        <?php if (empty($studenti)): ?>
+            <p style="color: red; padding: 20px; text-align: center;">Nu au fost găsiți studenți în baza de date.</p>
         <?php else: ?>
-            <?php foreach ($studenti_cu_restante as $s): ?>
+            <table>
+                <thead>
                 <tr>
-                    <td><?= $s['id_student'] ?></td>
-                    <td><?= htmlspecialchars($s['nume'] . " " . $s['prenume']) ?></td>
-                    <td><?= number_format($s['tarif_lunar'], 2) ?> RON</td>
-                    <td><?= number_format($s['total_datorat'], 2) ?> RON</td>
-                    <td><?= number_format($s['total_platit'], 2) ?> RON</td>
-                    <td class="<?= $s['restant'] > 0 ? 'restant-pozitiv' : 'restant-zero' ?>">
-                        <?= number_format($s['restant'], 2) ?> RON
-                    </td>
-                    <td>
-                        <a href="?student=<?= $s['id_student'] ?>">
-                            <!-- Am schimbat clasa de la btn-primary la btn-success -->
-                            <button class="btn-small btn-success">Detalii & Istoric</button> 
-                        </a>
-                    </td>
+                    <th>Nume Student</th>
+                    <th>Tarif/Lună</th>
+                    <th>Total Datorat</th>
+                    <th>Total Achitat</th>
+                    <th>Restanță</th>
                 </tr>
-            <?php endforeach; ?>
-        <?php endif; ?>
-    </table>
+                </thead>
+                <tbody>
+                <?php
+                $tot_incasat = 0;
+                $tot_restante = 0;
 
-
-    <!-- Secțiunea 4: Rapoarte Situații Incasări/Restanțe -->
-    <div class="raport-section">
-        <h2>Rapoarte Universitate</h2>
-
-        <!-- Raport Incasări -->
-        <div style="display: inline-block; width: 48%; vertical-align: top;">
-            <h3>Situație cu încasările Universității (Anual)</h3>
-            <?php if (!empty($raport_incasari)): ?>
-                <table class="report-table">
-                    <tr>
-                        <th>An</th>
-                        <th>Total Încăsat (RON)</th>
-                    </tr>
-                    <?php 
-                    $total_general_incasari = 0;
-                    foreach ($raport_incasari as $r): 
-                        $total_general_incasari += $r['total_incasat'];
+                foreach ($studenti as $s):
+                    $fin = calculeazaRestanta($pdo, (int)$s['id_student'], $luni_calcul);
+                    $tot_incasat += $fin['platit'];
+                    $tot_restante += $fin['restant'];
                     ?>
-                        <tr>
-                            <td><?= $r['an'] ?></td>
-                            <td><?= number_format($r['total_incasat'], 2) ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                    <tr style="font-weight: bold; background: #e0f2f1;">
-                        <td>TOTAL GENERAL</td>
-                        <td><?= number_format($total_general_incasari, 2) ?> RON</td>
-                    </tr>
-                </table>
-            <?php else: ?>
-                <p>Nu există înregistrări de plăți pentru a genera raportul de încasări.</p>
-            <?php endif; ?>
-        </div>
-
-        <!-- Raport Studenți Restanțieri -->
-        <div style="display: inline-block; width: 48%; vertical-align: top;">
-            <h3>Lista Studenților cu Sume Rămase de Încăsat (Restanțieri)</h3>
-            <?php 
-            $restantieri = array_filter($studenti_cu_restante, fn($s) => $s['restant'] > 0);
-            $total_restante_cumulate = array_reduce($restantieri, fn($sum, $s) => $sum + $s['restant'], 0);
-            ?>
-            <?php if (!empty($restantieri)): ?>
-                <table class="report-table" style="max-width: 100%;">
                     <tr>
-                        <th>Nume Student</th>
-                        <th>Restantă Curentă (RON)</th>
+                        <td><?= htmlspecialchars($s['nume'] . " " . $s['prenume']) ?></td>
+                        <td><?= number_format($fin['tarif'], 2) ?> RON</td>
+                        <td><?= number_format($fin['datorat'], 2) ?> RON</td>
+                        <td><?= number_format($fin['platit'], 2) ?> RON</td>
+                        <td class="<?= $fin['restant'] > 0 ? 'restant' : 'ok' ?>">
+                            <?= number_format($fin['restant'], 2) ?> RON
+                        </td>
                     </tr>
-                    <?php foreach ($restantieri as $r): ?>
-                        <tr>
-                            <td><?= htmlspecialchars($r['nume'] . " " . $r['prenume']) ?></td>
-                            <td class="restant-pozitiv"><?= number_format($r['restant'], 2) ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                    <tr style="font-weight: bold; background: #ffebee;">
-                        <td>TOTAL RESTANȚE CUMULATE</td>
-                        <td><?= number_format($total_restante_cumulate, 2) ?> RON</td>
-                    </tr>
-                </table>
-            <?php else: ?>
-                <p>Felicitări! Nu există studenți cu restanțe în baza de date (pentru anul academic curent, conform calculului de 10 luni).</p>
-            <?php endif; ?>
-        </div>
-
+                <?php endforeach; ?>
+                </tbody>
+                <tfoot style="background: #f1f5f9; font-weight: bold;">
+                <tr>
+                    <td colspan="3" style="text-align: right;">TOTAL GENERAL CAMPUS:</td>
+                    <td style="color: #10b981;"><?= number_format($tot_incasat, 2) ?> RON</td>
+                    <td class="restant"><?= number_format($tot_restante, 2) ?> RON</td>
+                </tr>
+                </tfoot>
+            </table>
+        <?php endif; ?>
     </div>
-
 </div>
 
 </body>
