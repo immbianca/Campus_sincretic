@@ -1,5 +1,7 @@
-TITLU TEMĂ:
+Proiect: https://github.com/immbianca/Campus_sincretic.git
 TEMA 3 - Baza de date pentru evidența locurilor de cazare într-un campus universitar, repartizarea studenților în camere.
+
+
 
 ECHIPA DE PROIECT:
 1. Moț-Loga Florian
